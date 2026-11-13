@@ -106,6 +106,21 @@ function smooth(values: number[], radius = 2): number[] {
   });
 }
 
+/** Lutningen (dy/dx) för en rät linje anpassad till punkterna med minsta kvadratmetoden. */
+function fitSlope(points: [number, number][]): number {
+  const n = points.length;
+  if (n < 2) return 0;
+  const mx = points.reduce((s, p) => s + p[0], 0) / n;
+  const my = points.reduce((s, p) => s + p[1], 0) / n;
+  let num = 0;
+  let den = 0;
+  for (const [x, y] of points) {
+    num += (x - mx) * (y - my);
+    den += (x - mx) ** 2;
+  }
+  return den > 1e-9 ? num / den : 0;
+}
+
 const THRESHOLD = 0.5;
 
 /** Samplar masken med bilinjär interpolation, i bildens pixelkoordinater. */
@@ -273,18 +288,29 @@ function measureFront(ctx: Ctx, out: ImageMeasurement) {
     return rows;
   };
 
-  // Bröst: medianbredd strax under armhålan.
-  const chestRows = torsoRows(0.3, 0.44);
-  if (chestRows.length) out.widths.chest = median(chestRows.map((r) => r.width)) * cm;
+  // Bröst: det fylligaste stället mellan armhåla och revbensbåge. Högst upp
+  // skymmer överarmen bålens kant, så där går bredden inte att mäta direkt.
+  const CHEST_LEVEL = 0.29;
+  const free = torsoRows(0.2, 0.5).filter((r) => !r.merged);
+  const upper = free.filter((r) => r.t <= 0.4);
+  if (upper.length >= 3 && upper[0].t <= CHEST_LEVEL + 0.02) {
+    out.widths.chest = percentile(smooth(upper.map((r) => r.width)), 0.75) * cm;
+  } else if (free.length >= 4) {
+    // Armhålan sitter lägre än bröstnivån: följ bålens kant uppåt därifrån.
+    const near = free.filter((r) => r.t <= free[0].t + 0.08);
+    const top = median(near.slice(0, Math.ceil(near.length / 2)).map((r) => r.width));
+    const slope = fitSlope(near.map((r) => [r.t, r.width]));
+    const gain = Math.max(0, -slope * (near[0].t - CHEST_LEVEL));
+    out.widths.chest = (top + Math.min(gain, 0.06 * top)) * cm;
+  }
 
   // Midja: bålens smalaste ställe.
-  const waistRows = torsoRows(0.56, 0.8);
-  if (waistRows.length >= 3) {
-    out.widths.waist = Math.min(...smooth(waistRows.map((r) => r.width))) * cm;
+  const waistRows = torsoRows(0.5, 0.8);
+  const waistFree = waistRows.filter((r) => !r.merged);
+  if (waistFree.length >= 3 && waistFree.length >= waistRows.length * 0.5) {
+    out.widths.waist = Math.min(...smooth(waistFree.map((r) => r.width))) * cm;
   }
-  const mergedRows = [...chestRows, ...waistRows].filter((r) => r.merged).length;
-  const totalRows = chestRows.length + waistRows.length;
-  if (totalRows && mergedRows / totalRows > 0.35) {
+  if (waistRows.length && waistFree.length < waistRows.length * 0.65) {
     out.armsMerged = true;
     out.issues.push("Armarna ligger mot kroppen – håll ut dem en bit från sidorna.");
   }
@@ -329,7 +355,7 @@ function measureFront(ctx: Ctx, out: ImageMeasurement) {
       }
       return widths;
     };
-    const thigh = segment(p[h], p[k], hp, kneeMid, 0.3, 0.4);
+    const thigh = segment(p[h], p[k], hp, kneeMid, 0.28, 0.38);
     if (thigh.length) thighs.push(median(thigh));
     const calf = segment(p[k], p[a], kneeMid, ankleMid, 0.15, 0.5);
     if (calf.length >= 3) calves.push(Math.max(...smooth(calf)));
@@ -366,18 +392,21 @@ function measureFront(ctx: Ctx, out: ImageMeasurement) {
     out.lengths.armLength = (armLengths.reduce((s, x) => s + x, 0) / armLengths.length) * cm;
   }
 
-  // Innerben: grenen är högsta punkten på glipan mellan benen.
+  // Innerben. Två oberoende skattningar:
+  //  1. glipan mellan benen – exakt när benen står isär, men för låg när låren ligger mot varandra
+  //  2. höftledens höjd – grenen sitter knappt 6 % av kroppslängden under höftleden
+  // Glipan används bara när den inte hamnar märkbart under höftledens skattning.
+  const floor = out.bottomY * ctx.imageHeight;
+  const fromHip = (floor - hp.y) * cm - 0.058 * H * cm;
   let crotch = Infinity;
   for (let x = hp.x - 0.012 * H; x <= hp.x + 0.012 * H; x += step) {
     const r = scanRay(v, x, hp.y, 0, 1, 0.16 * H, step);
     if (r && !r.hitLimit) crotch = Math.min(crotch, hp.y + r.d);
   }
   const drop = (crotch - hp.y) / H;
-  if (Number.isFinite(crotch) && drop > 0.015 && drop < 0.13 && v(hp.x, crotch + 0.03 * H) < THRESHOLD) {
-    out.lengths.inseam = (out.bottomY * ctx.imageHeight - crotch) * cm;
-  } else {
-    out.issues.push("Stå med benen lite isär så att innerbenet kan mätas.");
-  }
+  const gapFound = Number.isFinite(crotch) && drop > 0.015 && drop < 0.13 && v(hp.x, crotch + 0.03 * H) < THRESHOLD;
+  const fromGap = gapFound ? (floor - crotch) * cm : -Infinity;
+  out.lengths.inseam = fromGap >= fromHip - 2 ? fromGap : fromHip;
 }
 
 function measureSide(ctx: Ctx, out: ImageMeasurement) {
@@ -418,9 +447,9 @@ function measureSide(ctx: Ctx, out: ImageMeasurement) {
     }
     return depths;
   };
-  const chest = torso(0.28, 0.46);
+  const chest = torso(0.2, 0.42);
   if (chest.length) out.depths.chest = percentile(smooth(chest), 0.8) * cm;
-  const waist = torso(0.6, 0.76);
+  const waist = torso(0.54, 0.7);
   if (waist.length) out.depths.waist = median(waist) * cm;
   const hip = torso(0.92, 1.2);
   if (hip.length >= 3) out.depths.hip = Math.max(...smooth(hip)) * cm;
@@ -435,7 +464,7 @@ function measureSide(ctx: Ctx, out: ImageMeasurement) {
     }
     return depths;
   };
-  const thigh = leg(hp, knee, 0.3, 0.4);
+  const thigh = leg(hp, knee, 0.28, 0.38);
   if (thigh.length) out.depths.thigh = median(thigh) * cm;
   const calf = leg(knee, ankle, 0.15, 0.5);
   if (calf.length >= 3) out.depths.calf = Math.max(...smooth(calf)) * cm;

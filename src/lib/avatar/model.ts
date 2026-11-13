@@ -127,6 +127,19 @@ export interface BodyModel {
 
 const TWO_PI = Math.PI * 2;
 
+/** Halvt djup för en ellips med halv bredd a och given omkrets (Ramanujans närmevärde, intervallhalvering). */
+function ellipseDepthFor(a: number, circumference: number): number {
+  const perimeter = (b: number) => Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)));
+  let lo = a * 0.2;
+  let hi = a * 5;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (perimeter(mid) < circumference) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 export function buildBodyModel(m: BodyMeasurements, sex: Sex): BodyModel {
   const H = m.heightCm;
   const female = sex === "female";
@@ -190,12 +203,16 @@ export function buildBodyModel(m: BodyMeasurements, sex: Sex): BodyModel {
   }
   const torso = profile(torsoKeys);
 
-  // Benen står så att lårens utsida möter höftbredden.
-  const legX = Math.max(thighR * 0.98, hipA - thighR * 1.02);
+  // Benen står så att lårens utsida möter höftbredden. Får två runda lår inte
+  // plats i bredd trycks de ihop mot varandra och blir djupare i stället, med
+  // bibehållen omkrets – precis som på en riktig kropp.
+  const thighA = Math.min(thighR, hipA * 0.49);
+  const thighB = thighA < thighR ? ellipseDepthFor(thighA, m.thigh) : thighR * 1.04;
+  const legX = hipA * 0.98 - thighA;
   const legKeys: Key[] = [
-    { y: hip, x: legX, a: thighR, b: hipB * 0.8, z: hipZ, n: 2 },
-    { y: crotch, x: legX, a: thighR, b: thighR * 1.06, z: hipZ * 0.6, n: 2 },
-    { y: crotch - 0.1 * H, x: legX * 0.98, a: thighR * 0.87, b: thighR * 0.9, z: hipZ * 0.3, n: 2 },
+    { y: hip, x: legX, a: thighA, b: Math.max(hipB * 0.8, thighB * 0.9), z: hipZ, n: 2 },
+    { y: crotch, x: legX, a: thighA, b: thighB, z: hipZ * 0.6, n: 2 },
+    { y: crotch - 0.1 * H, x: legX * 0.98, a: Math.min(thighA, thighR * 0.87), b: thighR * 0.9, z: hipZ * 0.3, n: 2 },
     { y: knee + 0.035 * H, x: legX * 0.96, a: calfR * 1.07, b: calfR * 1.1, z: 0.3, n: 2 },
     { y: knee, x: legX * 0.95, a: calfR * 1.0, b: calfR * 1.04, z: 0.3, n: 2 },
     { y: knee - 0.035 * H, x: legX * 0.95, a: calfR * 0.93, b: calfR * 0.96, z: -0.2, n: 2 },

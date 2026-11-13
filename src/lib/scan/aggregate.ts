@@ -75,9 +75,9 @@ export function aggregateScan(
     if (depths.length) {
       depth = blend(priorD, depths);
     } else if (widths.length) {
-      // Utan sidobild: vikten är känd, så en bredare kropp måste vara grundare
-      // (och tvärtom). Kompensera halvvägs för att inte överdriva.
-      depth = priorD * Math.sqrt(priorW / width);
+      // Utan sidobild: vikten är känd, så en bredare kropp är oftast något grundare
+      // (och tvärtom). Kompensera försiktigt – sambandet är svagt.
+      depth = priorD * (priorW / width) ** 0.25;
     } else {
       depth = priorD;
     }

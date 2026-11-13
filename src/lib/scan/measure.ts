@@ -506,6 +506,35 @@ function prune<K extends string>(
   }
 }
 
+/** Vinkeln i punkten b mellan a och c, i grader. */
+function angleAt(a: Pt, b: Pt, c: Pt): number {
+  const v1 = { x: a.x - b.x, y: a.y - b.y };
+  const v2 = { x: c.x - b.x, y: c.y - b.y };
+  const cos = (v1.x * v2.x + v1.y * v2.y) / (Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y) || 1);
+  return (Math.acos(Math.min(1, Math.max(-1, cos))) * 180) / Math.PI;
+}
+
+/** Returnerar en uppmaning om personen inte står upprätt med armarna nedåt, annars null. */
+function postureIssue(p: Pt[], approxH: number): string | null {
+  const sh = midPt(p[LM.leftShoulder], p[LM.rightShoulder]);
+  const hp = midPt(p[LM.leftHip], p[LM.rightHip]);
+  const lean = (Math.atan2(Math.abs(hp.x - sh.x), hp.y - sh.y) * 180) / Math.PI;
+  if (hp.y <= sh.y || lean > 15) return "Stå rakt upp – överkroppen lutar för mycket.";
+  const knees = [
+    angleAt(p[LM.leftHip], p[LM.leftKnee], p[LM.leftAnkle]),
+    angleAt(p[LM.rightHip], p[LM.rightKnee], p[LM.rightAnkle]),
+  ];
+  if (Math.min(...knees) < 155) return "Stå med raka ben.";
+  if (Math.abs(p[LM.leftAnkle].x - p[LM.rightAnkle].x) > 0.42 * approxH) {
+    return "Stå med fötterna ungefär axelbrett isär, inte bredare.";
+  }
+  const lowestAllowed = sh.y + 0.12 * approxH;
+  if (p[LM.leftWrist].y < lowestAllowed || p[LM.rightWrist].y < lowestAllowed) {
+    return "Håll armarna snett nedåt, en bit ut från kroppen.";
+  }
+  return null;
+}
+
 /** Mäter en bild. heightCm är personens verkliga längd. */
 export function measureImage(input: ImageInput, heightCm: number): ImageMeasurement {
   const { landmarks, mask, imageWidth, imageHeight } = input;
@@ -530,18 +559,14 @@ export function measureImage(input: ImageInput, heightCm: number): ImageMeasurem
   const v = makeSampler(mask, imageWidth, imageHeight);
   const step = Math.max(1, imageHeight / mask.height);
 
-  const required = [
-    LM.nose,
-    LM.leftShoulder,
-    LM.rightShoulder,
-    LM.leftHip,
-    LM.rightHip,
-    LM.leftKnee,
-    LM.rightKnee,
-    LM.leftAnkle,
-    LM.rightAnkle,
+  // I profil skyms den bortre kroppshalvan, så det räcker att ena sidan av varje ledpar syns.
+  const pairs = [
+    [LM.leftShoulder, LM.rightShoulder],
+    [LM.leftHip, LM.rightHip],
+    [LM.leftKnee, LM.rightKnee],
+    [LM.leftAnkle, LM.rightAnkle],
   ];
-  if (required.some((i) => vis[i] < 0.5)) {
+  if (vis[LM.nose] < 0.3 || pairs.some(([a, b]) => Math.max(vis[a], vis[b]) < 0.5)) {
     out.issues.push("Hela kroppen måste synas, från huvud till fötter.");
     return out;
   }
@@ -550,6 +575,14 @@ export function measureImage(input: ImageInput, heightCm: number): ImageMeasurem
   const approxH = (ankleY - p[LM.nose].y) / 0.88;
   if (approxH < 0.3 * imageHeight) {
     out.issues.push("Du står för långt bort – fyll bilden på höjden.");
+    return out;
+  }
+
+  // Måtten förutsätter att man står rakt upp. Yogaställningar, sittande och
+  // armar i luften ger en siluett som inte går att mäta.
+  const posture = postureIssue(p, approxH);
+  if (posture) {
+    out.issues.push(posture);
     return out;
   }
 
@@ -568,10 +601,8 @@ export function measureImage(input: ImageInput, heightCm: number): ImageMeasurem
   if (top <= step * 1.5) out.issues.push("Huvudet är avklippt i överkant.");
 
   // Golvet: hälarna (tårna pekar mot kameran och hamnar lägre i bilden).
-  const heelsVisible = vis[LM.leftHeel] >= 0.4 && vis[LM.rightHeel] >= 0.4;
-  let bottom = heelsVisible
-    ? Math.max(p[LM.leftHeel].y, p[LM.rightHeel].y) + 0.012 * approxH
-    : ankleY + 0.045 * approxH;
+  const heels = [LM.leftHeel, LM.rightHeel].filter((i) => vis[i] >= 0.4).map((i) => p[i].y);
+  let bottom = heels.length ? Math.max(...heels) + 0.012 * approxH : ankleY + 0.045 * approxH;
   if (bottom >= imageHeight - 1) {
     out.issues.push("Fötterna är avklippta i nederkant.");
     bottom = imageHeight - 1;

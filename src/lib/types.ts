@@ -18,6 +18,8 @@ export interface Profile {
   clothingBudgetSek: number;
   foodBudgetSekPerWeek: number;
   styles: string[];
+  /** EU-storlek, tom sträng om den inte är angiven. */
+  shoeSize: string;
   diet: Diet;
   allergies: string;
 }
@@ -182,6 +184,8 @@ export interface Outfit {
 
 export interface StylistResult {
   source: "ai" | "demo";
+  /** När förslagen togs fram (ISO-datum). Priser från nätet gäller per det datumet. */
+  generatedAt?: string;
   summary: string;
   tips: string[];
   outfits: Outfit[];
@@ -270,6 +274,7 @@ export interface NutritionPlan {
 
 export interface HealthPlan {
   source: "ai" | "demo";
+  generatedAt?: string;
   training: TrainingPlan;
   nutrition: NutritionPlan;
   warnings: string[];

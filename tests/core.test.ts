@@ -26,6 +26,7 @@ const profile: Profile = {
   clothingBudgetSek: 2000,
   foodBudgetSekPerWeek: 700,
   styles: ["Minimalistisk"],
+  shoeSize: "43",
   diet: "omnivore",
   allergies: "",
 };
@@ -230,9 +231,28 @@ describe("bildmätning", () => {
     expect(many.sources.waist).toBe("scan");
   });
 
+  it("godtar profilbilder där den bortre kroppshalvan är skymd", () => {
+    const input = renderSynthetic(truth, "male", "side");
+    for (const i of [12, 14, 16, 24, 26, 28, 30, 32]) input.landmarks[i].visibility = 0.02;
+    const result = measureImage(input, 180);
+    expect(result.view).toBe("side");
+    expect(result.depths.waist).toBeDefined();
+  });
+
+  it("avvisar ställningar som inte går att mäta", () => {
+    const input = renderSynthetic(truth, "male", "front");
+    // Armarna rakt ut åt sidorna.
+    input.landmarks[15] = { ...input.landmarks[15], y: input.landmarks[11].y };
+    input.landmarks[16] = { ...input.landmarks[16], y: input.landmarks[12].y };
+    const result = measureImage(input, 180);
+    expect(result.ok).toBe(false);
+    expect(result.issues[0]).toContain("armarna");
+  });
+
   it("avvisar bilder där hela kroppen inte syns", () => {
     const input = renderSynthetic(truth, "male", "front");
     input.landmarks[27].visibility = 0.1;
+    input.landmarks[28].visibility = 0.1;
     const result = measureImage(input, 180);
     expect(result.ok).toBe(false);
     expect(result.issues[0]).toContain("Hela kroppen");

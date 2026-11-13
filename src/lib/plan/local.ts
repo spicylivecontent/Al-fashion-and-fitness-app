@@ -185,7 +185,7 @@ function roundGrams(grams: number, food: Food): number {
 
 function describe(grams: number, food: Food): string {
   if (food.unit) return `${Math.round(grams / food.unit.grams)} ${food.unit.name} ${food.name}`;
-  if (food === FOODS.milk || food === FOODS.oatDrink) return `${Math.round(grams / 10)} dl ${food.name}`;
+  if (food === FOODS.milk || food === FOODS.oatDrink) return `${(grams / 100).toFixed(1).replace(".", ",")} dl ${food.name}`;
   return `${grams} g ${food.name}`;
 }
 

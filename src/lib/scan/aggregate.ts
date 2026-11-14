@@ -50,8 +50,14 @@ export function aggregateScan(
 ): ScanSummary {
   const prior = estimateMeasurements(sex, heightCm, weightKg);
   const usable = images.filter((m) => m.ok);
-  const frontal = usable.filter((m) => m.view === "front" || m.view === "back");
-  const side = usable.filter((m) => m.view === "side");
+  // Rutor ur ett filmklipp är ofta lite vridna. Behåll bara de som är närmast rakt
+  // framifrån (bredast axelavstånd) respektive rakt från sidan (smalast axelavstånd).
+  const frontalAll = usable.filter((m) => m.view === "front" || m.view === "back");
+  const sideAll = usable.filter((m) => m.view === "side");
+  const widest = Math.max(0, ...frontalAll.map((m) => m.shoulderSpan));
+  const narrowest = Math.min(Infinity, ...sideAll.map((m) => m.shoulderSpan));
+  const frontal = frontalAll.filter((m) => m.shoulderSpan >= 0.92 * widest);
+  const side = sideAll.filter((m) => m.shoulderSpan <= narrowest + 0.03 * heightCm);
 
   const sources = {} as Record<EditableKey, MeasurementSource>;
   const m: BodyMeasurements = { ...prior };

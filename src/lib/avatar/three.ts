@@ -29,6 +29,8 @@ export function loftGeometry(
   });
 
   // Vänd trianglarna om ringarna går nedåt, så att normalerna alltid pekar utåt.
+  // Speglingen flyttar bara tvärsnittets mittpunkt (tvärsnitten är symmetriska),
+  // så den påverkar inte vilket håll ytorna vetter åt.
   const ascending = rings[rings.length - 1].y >= rings[0].y;
   const tri = (a: number, b: number, c: number) => (ascending ? indices.push(a, b, c) : indices.push(a, c, b));
   for (let i = 0; i < rings.length - 1; i++) {

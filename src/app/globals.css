@@ -151,6 +151,17 @@ nav {
 nav::-webkit-scrollbar {
   display: none;
 }
+@media (max-width: 640px) {
+  /* På smala skärmar radbryts menyn i stället för att gömma flikar utanför kanten. */
+  nav {
+    flex-wrap: wrap;
+    margin-left: 0;
+    overflow: visible;
+  }
+  nav button {
+    padding: 6px 10px;
+  }
+}
 nav button {
   flex: none;
   padding: 8px 12px;

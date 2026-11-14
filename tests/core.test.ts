@@ -282,3 +282,61 @@ describe("täckning av bilder", () => {
     expect(censorBoxes([], "female", 100, 100)).toEqual([]);
   });
 });
+
+describe("3D-geometri", () => {
+  it("vänder alla ytor utåt, även på spegelvända delar", async () => {
+    const { loftGeometry } = await import("@/lib/avatar/three");
+    const rings = [0, 10, 20].map((y) => ({ x: 8, y, z: 0, a: 5, b: 4, n: 2 }));
+    for (const mirror of [false, true]) {
+      for (const order of [rings, [...rings].reverse()]) {
+        const geometry = loftGeometry(order, false, false, mirror);
+        const pos = geometry.getAttribute("position");
+        const normal = geometry.getAttribute("normal");
+        const cx = mirror ? -8 : 8;
+        let outward = 0;
+        for (let i = 0; i < pos.count; i++) {
+          outward += (pos.getX(i) - cx) * normal.getX(i) + pos.getZ(i) * normal.getZ(i);
+        }
+        expect(outward).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("lägger ytterplaggets ärm utanpå en vid t-shirtärm", () => {
+    const m = estimateMeasurements("female", 168, 62);
+    const model = buildBodyModel(m, "female");
+    const { parts } = buildOutfitParts(model, m, "female", [
+      { kind: "tshirt", fit: "oversized", colorHex: "#111111", size: null },
+      { kind: "jacket", fit: "slim", colorHex: "#222222", size: null },
+    ]);
+    const sleeve = (color: string) => {
+      const part = parts.find((p) => p.type === "loft" && p.frame === "armL" && p.color === color);
+      if (!part || part.type !== "loft") throw new Error("saknas");
+      return part.rings;
+    };
+    const tee = sleeve("#111111");
+    const jacket = sleeve("#222222");
+    // Jackärmens yta mellan två ringar är linjär: kontrollera den exakt på varje t-shirtring.
+    const jacketAt = (y: number) => {
+      for (let i = 0; i < jacket.length - 1; i++) {
+        const [p, q] = [jacket[i], jacket[i + 1]];
+        if (y <= p.y && y >= q.y) return p.a + ((q.a - p.a) * (y - p.y)) / (q.y - p.y);
+      }
+      throw new Error("utanför ärmen");
+    };
+    for (const ring of tee) expect(jacketAt(ring.y)).toBeGreaterThan(ring.a);
+  });
+});
+
+describe("filmklipp", () => {
+  it("bortser från rutor där kroppen är snett vriden", () => {
+    const truth = estimateMeasurements("male", 180, 80);
+    const front = measureImage(renderSynthetic(truth, "male", "front"), 180);
+    const side = measureImage(renderSynthetic(truth, "male", "side"), 180);
+    // En vriden ruta: smalare axelavstånd och kraftigt överskattade mått.
+    const twisted = { ...front, shoulderSpan: front.shoulderSpan * 0.8, widths: { ...front.widths, waist: front.widths.waist! * 1.4 } };
+    const clean = aggregateScan("male", 180, 80, [front, side]);
+    const noisy = aggregateScan("male", 180, 80, [front, side, twisted, twisted, twisted]);
+    expect(noisy.measurements.waist).toBeCloseTo(clean.measurements.waist, 0);
+  });
+});

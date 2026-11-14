@@ -79,9 +79,10 @@ function piecewise(points: [number, number][]): Offset {
   };
 }
 
-function armRings(model: BodyModel, t0: number, t1: number, ease: number, flareTo?: number): Ring[] {
+/** Ärmens tvärsnitt från t0 till t1 (0 = axel, 1 = handled) med radien radius(t). */
+function armRings(model: BodyModel, t0: number, t1: number, radius: (t: number) => number): Ring[] {
   return range(t0, t1, 0.04).map((t) => {
-    const r = Math.max(model.armRadius(t) + ease, flareTo ?? 0);
+    const r = radius(t);
     return { x: 0, y: -t * model.armLength, z: 0, a: r, b: r, n: 2 };
   });
 }
@@ -154,7 +155,7 @@ export function buildBodyParts(model: BodyModel): Part[] {
       capEnd: true,
     }),
     ...both({ ...body, type: "ellipsoid", frame: "world", ...model.foot }),
-    ...both({ ...body, type: "loft", frame: "armL", rings: armRings(model, 0, 1, 0), capStart: true, capEnd: true }),
+    ...both({ ...body, type: "loft", frame: "armL", rings: armRings(model, 0, 1, model.armRadius), capStart: true, capEnd: true }),
     ...both({
       ...body,
       type: "ellipsoid",
@@ -226,8 +227,8 @@ export interface GarmentFitInfo {
 interface Layers {
   /** Yttersta lagrets vidd på bålen respektive armarna, så att nästa lager hamnar utanpå. */
   torso: Offset;
-  sleeve: number;
-  sleeveTo: number;
+  /** Yttersta ärmens radie vid t (0 = axel, 1 = handled); 0 där ingen ärm finns. */
+  sleeve: (t: number) => number;
 }
 
 function zoneColors(
@@ -268,7 +269,7 @@ export function buildOutfitParts(
   const { levels: L, H } = model;
   const parts: Part[] = [];
   const info: GarmentFitInfo[] = [];
-  const layers: Layers = { torso: () => 0.28, sleeve: 0, sleeveTo: 0 };
+  const layers: Layers = { torso: () => 0.28, sleeve: () => 0 };
 
   const order = { bottom: 0, onepiece: 0, top: 1, layer: 2, shoes: 3 } as const;
   const sorted = [...garments].sort((a, b) => order[slotOf(a.kind)] - order[slotOf(b.kind)]);
@@ -363,9 +364,16 @@ export function buildOutfitParts(
     parts.push({ ...base, type: "loft", frame: "world", rings, capStart: false, capEnd: false, ringColors: colorsFor(rings) });
 
     // Ärmar.
-    const sleeveEase = Math.max(SLEEVE_EASE[g.fit] + style.extraEase, layers.sleeveTo > 0 ? layers.sleeve + 0.4 : 0);
+    const sleeveEase = SLEEVE_EASE[g.fit] + style.extraEase;
     const short = style.sleeveTo < 0.5;
-    const sleeve = armRings(model, 0, style.sleeveTo, sleeveEase, short ? model.armRadius(0.27) + sleeveEase + 0.6 : undefined);
+    const flareTo = short ? model.armRadius(0.27) + sleeveEase + 0.6 : 0;
+    const underSleeve = layers.sleeve;
+    // Ärmen följer armen, men hamnar alltid utanpå ärmen på plagget under.
+    const sleeveRadius = (t: number) => {
+      const under = underSleeve(t);
+      return Math.max(model.armRadius(t) + sleeveEase, flareTo, under > 0 ? under + 0.4 : 0);
+    };
+    const sleeve = armRings(model, 0, style.sleeveTo, sleeveRadius);
     const sleeveColors = colorsFor(sleeve, L.chest);
     const r0 = sleeve[0].a;
     parts.push(
@@ -396,8 +404,11 @@ export function buildOutfitParts(
     }
 
     layers.torso = (y) => (y >= hemY && y <= neckline ? Math.max(under(y), offset(y)) : under(y));
-    layers.sleeve = sleeveEase;
-    layers.sleeveTo = style.sleeveTo;
+    const sleeveTo = style.sleeveTo;
+    // Räkna ärmen som lite längre än den är, så att ytterärmen inte hinner smalna
+    // av förrän den passerat fållen (ringarna ligger 0,04 isär längs armen).
+    layers.sleeve = (t) =>
+      t <= sleeveTo + 0.06 ? Math.max(underSleeve(t), sleeveRadius(Math.min(t, sleeveTo))) : underSleeve(t);
   }
 
   return { parts, info };

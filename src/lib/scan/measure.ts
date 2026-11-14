@@ -42,6 +42,8 @@ export interface ImageMeasurement {
   issues: string[];
   /** Armarna ligger mot kroppen så att bål och armar inte går att skilja åt. */
   armsMerged: boolean;
+  /** Avståndet mellan axellederna i cm, sett i bilden. Avslöjar hur mycket kroppen är vriden. */
+  shoulderSpan: number;
   widths: Partial<Record<WidthKey, number>>;
   depths: Partial<Record<DepthKey, number>>;
   lengths: Partial<Record<LengthKey, number>>;
@@ -360,8 +362,12 @@ function measureFront(ctx: Ctx, out: ImageMeasurement) {
     const calf = segment(p[k], p[a], kneeMid, ankleMid, 0.15, 0.5);
     if (calf.length >= 3) calves.push(Math.max(...smooth(calf)));
   }
-  if (thighs.length) out.widths.thigh = (thighs.reduce((s, x) => s + x, 0) / thighs.length) * cm;
-  if (calves.length) out.widths.calf = (calves.reduce((s, x) => s + x, 0) / calves.length) * cm;
+  // När benen skymmer varandra (kroppen lätt vriden) flyter de ihop i siluetten.
+  // Ett lår kan inte vara bredare än drygt halva höften, och vaden inte bredare än låret.
+  const thigh = thighs.length ? (thighs.reduce((s, x) => s + x, 0) / thighs.length) * cm : NaN;
+  const calf = calves.length ? (calves.reduce((s, x) => s + x, 0) / calves.length) * cm : NaN;
+  if (Number.isFinite(thigh) && (out.widths.hip === undefined || thigh <= 0.6 * out.widths.hip)) out.widths.thigh = thigh;
+  if (Number.isFinite(calf) && (out.widths.thigh === undefined || calf <= 0.85 * out.widths.thigh)) out.widths.calf = calf;
 
   // Överarm: bredd vinkelrätt mot armen, mitt emellan axel och armbåge.
   const biceps: number[] = [];
@@ -544,6 +550,7 @@ export function measureImage(input: ImageInput, heightCm: number): ImageMeasurem
     cmPerPx: 0,
     issues: [],
     armsMerged: false,
+    shoulderSpan: 0,
     widths: {},
     depths: {},
     lengths: {},
@@ -611,6 +618,7 @@ export function measureImage(input: ImageInput, heightCm: number): ImageMeasurem
   const H = bottom - top;
   const cm = heightCm / H;
   out.cmPerPx = cm;
+  out.shoulderSpan = Math.abs(p[LM.leftShoulder].x - p[LM.rightShoulder].x) * cm;
   out.topY = top / imageHeight;
   out.bottomY = bottom / imageHeight;
 
